@@ -133,49 +133,90 @@ pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, clip_model.visual.attnp
 pos_embed.weight = resize_pos_embed(clip_model.visual.attnpool.positional_embedding.unsqueeze(0), pos_embed)
 clip_model.visual.attnpool.positional_embedding = pos_embed
 
-img_path = './vVq18ML.png'
+#
+# start server
+#
+
+import io
+from flask import Flask, request, send_file, make_response, abort
+
+app = Flask(__name__)
+
+# img_path = './vVq18ML.png'
 # from IPython.display import Image as show_image
 # show_image(img_path)
 
-with torch.no_grad():
-    image = preprocess(Image.open( img_path ).convert("RGB"))
-    image = torch.tensor(np.stack([image])).to(device)
-    image -= image_mean
-    image /= image_std
+def getCaption(postData):
+    with torch.no_grad():
+        image = Image.open(io.BytesIO(postData)).convert("RGB")
+        image = torch.tensor(np.stack([image])).to(device)
+        image -= image_mean
+        image /= image_std
+        
+        tmp_att, tmp_fc = clip_model.encode_image(image)
+        tmp_att = tmp_att[0].permute(1, 2, 0)
+        tmp_fc = tmp_fc[0]
+        
+        att_feat = tmp_att
+        fc_feat = tmp_fc
+
+    # Inference configurations
+    eval_kwargs = {}
+    eval_kwargs.update(vars(opt))
+
+    verbose = eval_kwargs.get('verbose', True)
+    verbose_beam = eval_kwargs.get('verbose_beam', 0)
+    verbose_loss = eval_kwargs.get('verbose_loss', 1)
+
+    # dataset = eval_kwargs.get('dataset', 'coco')
+    beam_size = eval_kwargs.get('beam_size', 1)
+    sample_n = eval_kwargs.get('sample_n', 1)
+    remove_bad_endings = eval_kwargs.get('remove_bad_endings', 0)
+
+    with torch.no_grad():
+        fc_feats = torch.zeros((1,0)).to(device)
+        att_feats = att_feat.view(1, 196, 2048).float().to(device)
+        att_masks = None
+
+        # forward the model to also get generated samples for each image
+        # Only leave one feature for each image, in case duplicate sample
+        tmp_eval_kwargs = eval_kwargs.copy()
+        tmp_eval_kwargs.update({'sample_n': 1})
+        seq, seq_logprobs = model(
+            fc_feats, att_feats, att_masks, opt=tmp_eval_kwargs, mode='sample')
+        seq = seq.data
+
+        sents = utils.decode_sequence(model.vocab, seq)
+        sents = sents.join(' ')
+        return sents
+
+
+@app.route("/caption", methods=["POST", "OPTIONS"])
+def home():
+    if request.method == "OPTIONS":
+        response = make_response("", 200)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        return response
     
-    tmp_att, tmp_fc = clip_model.encode_image(image)
-    tmp_att = tmp_att[0].permute(1, 2, 0)
-    tmp_fc = tmp_fc[0]
-    
-    att_feat = tmp_att
-    fc_feat = tmp_fc
+    postData = request.get_data()
+    caption = getCaption(postData)
+    response = make_response(caption, 200)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    return response
 
-# Inference configurations
-eval_kwargs = {}
-eval_kwargs.update(vars(opt))
 
-verbose = eval_kwargs.get('verbose', True)
-verbose_beam = eval_kwargs.get('verbose_beam', 0)
-verbose_loss = eval_kwargs.get('verbose_loss', 1)
-
-# dataset = eval_kwargs.get('dataset', 'coco')
-beam_size = eval_kwargs.get('beam_size', 1)
-sample_n = eval_kwargs.get('sample_n', 1)
-remove_bad_endings = eval_kwargs.get('remove_bad_endings', 0)
-
-with torch.no_grad():
-    fc_feats = torch.zeros((1,0)).to(device)
-    att_feats = att_feat.view(1, 196, 2048).float().to(device)
-    att_masks = None
-
-    # forward the model to also get generated samples for each image
-    # Only leave one feature for each image, in case duplicate sample
-    tmp_eval_kwargs = eval_kwargs.copy()
-    tmp_eval_kwargs.update({'sample_n': 1})
-    seq, seq_logprobs = model(
-        fc_feats, att_feats, att_masks, opt=tmp_eval_kwargs, mode='sample')
-    seq = seq.data
-
-    sents = utils.decode_sequence(model.vocab, seq)
-
-print(sents)
+if __name__ == "__main__":
+    print("Starting server...")
+    app.run(
+        host="0.0.0.0",
+        port=80,
+        debug=False,
+        # dev_tools_silence_routes_logging = False,
+        # dev_tools_ui=True,
+        # dev_tools_hot_reload=True,
+        threaded=True,
+    )
