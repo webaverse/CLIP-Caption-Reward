@@ -188,7 +188,7 @@ def getCaption(postData):
         seq = seq.data
 
         sents = utils.decode_sequence(model.vocab, seq)
-        sents = sents.join(' ')
+        print(f'{sents} {sents[0]}')
         return sents
 
 
