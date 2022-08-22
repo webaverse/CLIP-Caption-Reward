@@ -142,14 +142,14 @@ from flask import Flask, request, send_file, make_response, abort
 
 app = Flask(__name__)
 
-img_path = './vVq18ML.png'
+# img_path = './vVq18ML.png'
 # from IPython.display import Image as show_image
 # show_image(img_path)
 
 def getCaption(postData):
     with torch.no_grad():
-        # image = Image.open(io.BytesIO(postData)).convert("RGB")
-        image = preprocess(Image.open( img_path ).convert("RGB"))
+        # image = preprocess(Image.open( img_path ).convert("RGB"))
+        image = preprocess(Image.open(io.BytesIO(postData)).convert("RGB"))
         image = torch.tensor(np.stack([image])).to(device)
         image -= image_mean
         image /= image_std
@@ -188,8 +188,8 @@ def getCaption(postData):
         seq = seq.data
 
         sents = utils.decode_sequence(model.vocab, seq)
-        print(f'{sents} {sents[0]}')
-        return sents
+        print(f'{sents}')
+        return sents[0]
 
 
 @app.route("/caption", methods=["POST", "OPTIONS"])
